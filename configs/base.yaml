@@ -1,0 +1,100 @@
+# Base configuration for knowledge distillation training
+# This file contains common settings shared across all KD methods
+
+# Model configuration
+model:
+  # Path to the student model (will be trained)
+  student_path: "Qwen/Qwen3-8B"
+  # Path to the teacher model (provides supervision)
+  teacher_path: "Qwen/Qwen3-8B"
+  # Qwen3 thinking mode: false for non-thinking mode (recommended for this task)
+  enable_thinking: false
+  # Data type for model weights
+  torch_dtype: "bfloat16"
+  # Attention implementation (use flash_attention_2 for efficiency)
+  attn_implementation: "flash_attention_2"
+  # Trust remote code for loading custom models
+  trust_remote_code: true
+
+# Data configuration
+data:
+  # Path to the teacher dataset (with experience in system prompt)
+  teacher_data_path: "train_data/alfworld_valid_train_matts_top2_qwen3-8b.jsonl"
+  # Path to the student dataset (without experience in system prompt)
+  student_data_path: "train_data/noexp_alfworld_valid_train_matts_top2_qwen3-8b.jsonl"
+  # Maximum sequence length for training
+  max_seq_length: 4096
+  # Number of data loading workers
+  num_workers: 4
+
+# Training configuration
+training:
+  # Output directory for saving checkpoints and logs
+  output_dir: "outputs/kd_experiment"
+  # Batch size per device during training
+  per_device_train_batch_size: 2
+  # Batch size per device during evaluation
+  per_device_eval_batch_size: 2
+  # Number of gradient accumulation steps
+  gradient_accumulation_steps: 8
+  # Effective batch size = per_device_train_batch_size * gradient_accumulation_steps * num_gpus
+  # With 8 GPUs: 2 * 8 * 8 = 128
+  
+  # Learning rate
+  learning_rate: 2.0e-5
+  # Weight decay
+  weight_decay: 0.01
+  # Number of training epochs
+  num_train_epochs: 3
+  # Maximum training steps (overrides num_train_epochs if set)
+  max_steps: -1
+  # Warmup ratio
+  warmup_ratio: 0.1
+  # Learning rate scheduler type
+  lr_scheduler_type: "cosine"
+  
+  # Mixed precision training
+  bf16: true
+  fp16: false
+  
+  # Gradient checkpointing for memory efficiency
+  gradient_checkpointing: true
+  
+  # Logging configuration
+  logging_steps: 10
+  logging_first_step: true
+  
+  # Evaluation and saving
+  eval_strategy: "steps"
+  eval_steps: 100
+  save_strategy: "steps"
+  save_steps: 100
+  save_total_limit: 3
+  load_best_model_at_end: true
+  
+  # Reproducibility
+  seed: 42
+  data_seed: 42
+
+# LoRA/PEFT configuration (optional, for parameter-efficient fine-tuning)
+peft:
+  enabled: false
+  lora_r: 64
+  lora_alpha: 128
+  lora_dropout: 0.05
+  target_modules:
+    - "q_proj"
+    - "k_proj"
+    - "v_proj"
+    - "o_proj"
+    - "gate_proj"
+    - "up_proj"
+    - "down_proj"
+
+# Wandb logging (optional)
+wandb:
+  enabled: false
+  project: "kd-qwen3"
+  entity: null
+  run_name: null
+

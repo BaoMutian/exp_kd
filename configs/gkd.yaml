@@ -1,0 +1,65 @@
+# GKD (Generalized Knowledge Distillation) configuration
+# GKD uses on-policy learning where the student generates outputs
+# and receives token-level feedback from the teacher
+
+# Inherit from base configuration
+defaults:
+  - base
+
+# Override model settings if needed
+model:
+  student_path: "Qwen/Qwen3-8B"
+  teacher_path: "Qwen/Qwen3-8B"
+
+# GKD specific settings (following TRL GKDConfig)
+gkd:
+  # Lambda: controls the student data fraction (on-policy ratio)
+  # lmbda=0.0: supervised JSD (like SKD, train on ground-truth)
+  # lmbda=1.0: on-policy JSD (train on student-generated outputs)
+  # lmbda=0.5: mix of both
+  lmbda: 0.5
+  
+  # Beta: interpolation in generalized Jensen-Shannon Divergence
+  # beta=0.0: approximates forward KL divergence
+  # beta=1.0: approximates reverse KL divergence
+  # beta=0.5: balanced JSD
+  beta: 0.5
+  
+  # Temperature for sampling during on-policy generation
+  temperature: 0.9
+  
+  # Maximum number of new tokens to generate per completion
+  max_new_tokens: 256
+  
+  # Whether to perform Sequence-Level KD
+  # When seq_kd=True and lmbda=0.0, teacher generates sequences for supervised JSD
+  seq_kd: false
+  
+  # Whether to disable dropout (recommended for distillation)
+  disable_dropout: true
+
+# Training configuration overrides
+training:
+  output_dir: "outputs/gkd"
+  
+  num_train_epochs: 3
+  
+  # GKD requires more memory due to on-policy generation
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16
+  
+  # Learning rate
+  learning_rate: 1.0e-5
+  
+  # Evaluation settings
+  eval_strategy: "steps"
+  eval_steps: 200
+
+# Generation settings for on-policy sampling (Qwen3 non-thinking mode)
+generation:
+  temperature: 0.7
+  top_p: 0.8
+  top_k: 20
+  min_p: 0.0
+  do_sample: true
+

@@ -1,0 +1,41 @@
+# SeqKD (Sequence-Level Knowledge Distillation) configuration
+# SeqKD trains the student model to mimic teacher's output sequences directly
+# This is essentially SFT on teacher-generated outputs
+
+# Inherit from base configuration
+defaults:
+  - base
+
+# Override model settings if needed
+model:
+  student_path: "Qwen/Qwen3-8B"
+
+# SeqKD specific settings
+seqkd:
+  # SeqKD doesn't need the teacher model at training time
+  # since we use pre-generated teacher outputs as hard labels
+  use_teacher_at_training: false
+
+# Training configuration overrides
+training:
+  output_dir: "outputs/seqkd"
+  
+  # SeqKD typically requires fewer epochs since it's standard SFT
+  num_train_epochs: 3
+  
+  # Learning rate (slightly higher than other KD methods since simpler objective)
+  learning_rate: 2.0e-5
+  
+  # Batch size settings for 8x A100 90GB
+  per_device_train_batch_size: 2
+  gradient_accumulation_steps: 8
+
+# SFT specific settings (used by TRL SFTTrainer)
+sft:
+  # Maximum sequence length
+  max_seq_length: 4096
+  # Packing multiple samples into one sequence for efficiency
+  packing: false
+  # Dataset text field (for non-chat format, not used here)
+  dataset_text_field: null
+

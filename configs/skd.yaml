@@ -1,0 +1,41 @@
+# SKD (Supervised Knowledge Distillation) configuration
+# SKD trains the student to match teacher's token-level probability distribution
+# using KL divergence on ground-truth sequences
+
+# Inherit from base configuration
+defaults:
+  - base
+
+# Override model settings if needed
+model:
+  student_path: "Qwen/Qwen3-8B"
+  teacher_path: "Qwen/Qwen3-8B"
+
+# SKD specific settings
+skd:
+  # Temperature for softening probability distributions
+  # Higher temperature -> softer distributions -> more knowledge transfer
+  temperature: 2.0
+  
+  # Alpha: weight for the distillation loss vs. standard CE loss
+  # total_loss = alpha * kl_loss + (1 - alpha) * ce_loss
+  alpha: 0.7
+  
+  # KL divergence direction
+  # "forward": KL(p_teacher || p_student) - mean-seeking, may cause hallucinations
+  # "reverse": KL(p_student || p_teacher) - mode-seeking, reduces diversity
+  kl_direction: "forward"
+
+# Training configuration overrides
+training:
+  output_dir: "outputs/skd"
+  
+  num_train_epochs: 3
+  
+  # SKD requires loading both teacher and student, may need smaller batch size
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16
+  
+  # Lower learning rate for distillation
+  learning_rate: 1.0e-5
+
