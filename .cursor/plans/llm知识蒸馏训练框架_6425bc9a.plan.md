@@ -27,7 +27,7 @@ todos:
       - data-module
   - id: distributed-config
     content: 添加分布式训练配置 (DeepSpeed/Accelerate)
-    status: in_progress
+    status: completed
     dependencies:
       - seqkd-impl
       - skd-impl
