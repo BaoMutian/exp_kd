@@ -7,10 +7,6 @@ set -e
 # Default configuration
 CONFIG_FILE="${1:-configs/gkd.yaml}"
 
-# Activate conda environment
-source $(conda info --base)/etc/profile.d/conda.sh
-conda activate icml26
-
 # Check GPU availability
 echo "Available GPUs:"
 nvidia-smi --query-gpu=index,name,memory.total --format=csv,noheader

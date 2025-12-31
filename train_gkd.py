@@ -229,7 +229,7 @@ def main():
         seq_kd=seq_kd,
         disable_dropout=disable_dropout,
         # SFT parameters for data handling
-        max_seq_length=data_config.get("max_seq_length", 4096),
+        max_length=data_config.get("max_seq_length", 4096),
     )
     
     # Custom formatting function for Qwen3 non-thinking mode

@@ -8,10 +8,6 @@ echo "=========================================="
 echo "Running Knowledge Distillation Experiments"
 echo "=========================================="
 
-# Activate conda environment
-source $(conda info --base)/etc/profile.d/conda.sh
-conda activate icml26
-
 # Run SeqKD
 echo ""
 echo "=========================================="
