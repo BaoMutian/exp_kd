@@ -18,6 +18,10 @@ Usage:
         --config configs/online_kd.yaml
 """
 
+from src.trainers.online_kd_trainer import OnlineKDTrainer, OnlineKDDataCollator
+# Reuse SKD dataset (has both teacher and student messages)
+from src.data import create_skd_dataset
+from src.utils import load_config, get_torch_dtype
 import argparse
 import logging
 import os
@@ -30,10 +34,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 
 # Add project root to path for local imports
 sys.path.insert(0, str(Path(__file__).parent))
-
-from src.utils import load_config, get_torch_dtype
-from src.data import create_skd_dataset  # Reuse SKD dataset (has both teacher and student messages)
-from src.trainers.online_kd_trainer import OnlineKDTrainer, OnlineKDDataCollator
 
 
 logging.basicConfig(
@@ -54,14 +54,16 @@ def parse_args():
     # Allow overriding config values from command line
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--num_train_epochs", type=int, default=None)
-    parser.add_argument("--per_device_train_batch_size", type=int, default=None)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=None)
+    parser.add_argument("--per_device_train_batch_size",
+                        type=int, default=None)
+    parser.add_argument("--gradient_accumulation_steps",
+                        type=int, default=None)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--max_new_tokens", type=int, default=None)
     parser.add_argument("--num_samples", type=int, default=None,
                         help="Number of responses to sample from student per input")
-    parser.add_argument("--kl_type", type=str, 
+    parser.add_argument("--kl_type", type=str,
                         choices=["forward", "reverse", "jsd"], default=None)
     parser.add_argument("--beta", type=float, default=None)
 
@@ -265,4 +267,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

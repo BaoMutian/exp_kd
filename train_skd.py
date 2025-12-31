@@ -25,6 +25,10 @@ Usage:
         --config configs/skd.yaml
 """
 
+from src.data import create_skd_dataset
+from src.trainers import SKDTrainer
+from src.trainers.skd_trainer import SKDDataCollator
+from src.utils import load_config, get_torch_dtype
 import argparse
 import logging
 import os
@@ -37,11 +41,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 
 # Add project root to path for local imports
 sys.path.insert(0, str(Path(__file__).parent))
-
-from src.utils import load_config, get_torch_dtype
-from src.trainers.skd_trainer import SKDDataCollator
-from src.trainers import SKDTrainer
-from src.data import create_skd_dataset
 
 
 logging.basicConfig(

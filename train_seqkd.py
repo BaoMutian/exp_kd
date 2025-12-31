@@ -22,6 +22,8 @@ Usage:
         --config configs/seqkd.yaml
 """
 
+from src.data import create_seqkd_dataset
+from src.utils import load_config, get_torch_dtype
 import argparse
 import logging
 import os
@@ -36,9 +38,6 @@ from trl import SFTConfig, SFTTrainer
 
 # Add project root to path for local imports
 sys.path.insert(0, str(Path(__file__).parent))
-
-from src.utils import load_config, get_torch_dtype
-from src.data import create_seqkd_dataset
 
 
 logging.basicConfig(
