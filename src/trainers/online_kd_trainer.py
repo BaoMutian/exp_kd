@@ -464,7 +464,7 @@ class OnlineKDTrainer(Trainer):
         # Sum up losses - if no valid tokens, return zero loss
         if len(losses) == 0:
             return torch.tensor(0.0, device=device, requires_grad=True), 0
-        
+
         total_loss = torch.stack(losses).sum()
         return total_loss, total_tokens
 
@@ -491,11 +491,11 @@ class OnlineKDTrainer(Trainer):
         eps = 1e-8
         t_probs = F.softmax(t_logits, dim=-1).clamp(min=eps)
         s_probs = F.softmax(s_logits, dim=-1).clamp(min=eps)
-        
+
         # Re-normalize after clamping
         t_probs = t_probs / t_probs.sum(dim=-1, keepdim=True)
         s_probs = s_probs / s_probs.sum(dim=-1, keepdim=True)
-        
+
         # Compute log probabilities
         t_log_probs = t_probs.log()
         s_log_probs = s_probs.log()
