@@ -59,18 +59,20 @@ training:
 
   # Gradient checkpointing for memory efficiency
   gradient_checkpointing: true
+  
+  # Gradient clipping to prevent exploding gradients
+  max_grad_norm: 1.0
 
   # Logging configuration
   logging_steps: 10
   logging_first_step: true
 
   # Evaluation and saving
-  # Set eval_strategy to "steps" only if you provide an eval_dataset
   eval_strategy: "no"
   eval_steps: 100
   save_strategy: "steps"
   save_steps: 100
-  save_total_limit: 3
+  save_total_limit: 3   
   # Requires eval_dataset when set to true
   load_best_model_at_end: false
 

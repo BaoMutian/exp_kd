@@ -200,6 +200,7 @@ def main():
         bf16=training_config.get("bf16", True),
         fp16=training_config.get("fp16", False),
         gradient_checkpointing=training_config.get("gradient_checkpointing", True),
+        max_grad_norm=training_config.get("max_grad_norm", 0.5),
         logging_steps=training_config.get("logging_steps", 10),
         logging_first_step=training_config.get("logging_first_step", True),
         eval_strategy=training_config.get("eval_strategy", "no"),

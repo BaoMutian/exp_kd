@@ -15,16 +15,20 @@ model:
 skd:
   # Temperature for softening probability distributions
   # Higher temperature -> softer distributions -> more knowledge transfer
-  temperature: 2.0
+  # Recommended: 2.0-4.0 for distillation
+  temperature: 4.0
   
   # Alpha: weight for the distillation loss vs. standard CE loss
   # total_loss = alpha * kl_loss + (1 - alpha) * ce_loss
-  alpha: 0.7
+  # Lower alpha = more weight on CE loss (more stable)
+  # Recommended: 0.3-0.5 for stability
+  alpha: 0.5
   
   # KL divergence direction
-  # "forward": KL(p_teacher || p_student) - mean-seeking, may cause hallucinations
-  # "reverse": KL(p_student || p_teacher) - mode-seeking, reduces diversity
-  kl_direction: "forward"
+  # "forward": KL(p_teacher || p_student) - mean-seeking, covers all modes
+  # "reverse": KL(p_student || p_teacher) - mode-seeking, focuses on high-prob tokens
+  # Recommended: "reverse" is often more stable for same-size teacher/student
+  kl_direction: "reverse"
 
 # Training configuration overrides
 training:
@@ -36,6 +40,9 @@ training:
   per_device_train_batch_size: 1
   gradient_accumulation_steps: 16
   
-  # Lower learning rate for distillation
-  learning_rate: 1.0e-5
+  # Lower learning rate for distillation (important for stability)
+  learning_rate: 5.0e-6
+  
+  # Stricter gradient clipping for SKD
+  max_grad_norm: 0.5
 
