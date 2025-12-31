@@ -39,7 +39,7 @@
         "stage3_gather_16bit_weights_on_model_save": true
     },
     "gradient_accumulation_steps": "auto",
-    "gradient_clipping": 1.0,
+    "gradient_clipping": "auto",
     "steps_per_print": 10,
     "train_batch_size": "auto",
     "train_micro_batch_size_per_gpu": "auto",
