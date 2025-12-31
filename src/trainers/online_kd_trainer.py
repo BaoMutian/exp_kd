@@ -487,34 +487,34 @@ class OnlineKDTrainer(Trainer):
         s_logits = student_logits / self.temperature
         t_logits = teacher_logits / self.temperature
 
-        # Use log_softmax for numerical stability
-        s_log_probs = F.log_softmax(s_logits, dim=-1)
-        t_log_probs = F.log_softmax(t_logits, dim=-1)
+        # Compute probabilities with numerical stability (clamp to avoid 0)
+        eps = 1e-8
+        t_probs = F.softmax(t_logits, dim=-1).clamp(min=eps)
+        s_probs = F.softmax(s_logits, dim=-1).clamp(min=eps)
+        
+        # Re-normalize after clamping
+        t_probs = t_probs / t_probs.sum(dim=-1, keepdim=True)
+        s_probs = s_probs / s_probs.sum(dim=-1, keepdim=True)
+        
+        # Compute log probabilities
+        t_log_probs = t_probs.log()
+        s_log_probs = s_probs.log()
 
         if self.kl_type == "forward":
             # Forward KL: KL(teacher || student) = sum(t * (log_t - log_s))
-            # Use F.kl_div for numerical stability (expects log_probs as input)
-            # F.kl_div(input, target) computes sum(target * (log_target - input))
-            # So: kl_div(s_log_probs, t_probs) = sum(t * (log_t - s_log_probs))
-            t_probs = F.softmax(t_logits, dim=-1)
-            kl = F.kl_div(s_log_probs, t_probs, reduction='batchmean')
+            # Mean-seeking: student tries to cover all modes of teacher
+            kl = (t_probs * (t_log_probs - s_log_probs)).sum(dim=-1).mean()
         elif self.kl_type == "reverse":
             # Reverse KL: KL(student || teacher) = sum(s * (log_s - log_t))
-            s_probs = F.softmax(s_logits, dim=-1)
-            kl = F.kl_div(t_log_probs, s_probs, reduction='batchmean')
+            # Mode-seeking: student focuses on high-probability regions
+            kl = (s_probs * (s_log_probs - t_log_probs)).sum(dim=-1).mean()
         else:  # jsd
-            # Generalized JSD with numerical stability
-            t_probs = F.softmax(t_logits, dim=-1)
-            s_probs = F.softmax(s_logits, dim=-1)
-            
-            # Mixture distribution with clamping for numerical stability
+            # Generalized JSD
             m_probs = self.beta * t_probs + (1 - self.beta) * s_probs
-            m_probs = m_probs.clamp(min=1e-8)  # Prevent log(0)
             m_log_probs = m_probs.log()
 
-            # Compute KL divergences to mixture using F.kl_div
-            kl_t_m = F.kl_div(m_log_probs, t_probs, reduction='batchmean')
-            kl_s_m = F.kl_div(m_log_probs, s_probs, reduction='batchmean')
+            kl_t_m = (t_probs * (t_log_probs - m_log_probs)).sum(dim=-1).mean()
+            kl_s_m = (s_probs * (s_log_probs - m_log_probs)).sum(dim=-1).mean()
             kl = self.beta * kl_t_m + (1 - self.beta) * kl_s_m
 
         # Scale by temperature^2
