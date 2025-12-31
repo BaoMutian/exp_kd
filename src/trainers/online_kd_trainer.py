@@ -331,7 +331,7 @@ class OnlineKDTrainer(Trainer):
             student_prompt_mask,
         )
 
-        total_loss = torch.tensor(0.0, device=device, requires_grad=True)
+        sample_losses = []
         total_tokens = 0
         num_valid_samples = 0
 
@@ -379,15 +379,17 @@ class OnlineKDTrainer(Trainer):
             )
 
             if sample_tokens > 0:
-                total_loss = total_loss + sample_loss
+                sample_losses.append(sample_loss)
                 total_tokens += sample_tokens
                 num_valid_samples += 1
 
         # Average across samples and tokens
-        if total_tokens > 0:
+        if len(sample_losses) > 0 and total_tokens > 0:
+            total_loss = torch.stack(sample_losses).sum()
             avg_loss = total_loss / total_tokens
         else:
-            avg_loss = total_loss
+            # Return a zero loss that still has gradient graph
+            avg_loss = torch.tensor(0.0, device=device, requires_grad=True)
 
         # Log losses
         if self.state.global_step % self.args.logging_steps == 0:
@@ -426,24 +428,24 @@ class OnlineKDTrainer(Trainer):
         response_len = response_mask.size(1)
         device = student_logits.device
 
-        total_loss = torch.tensor(0.0, device=device, requires_grad=True)
+        losses = []
         total_tokens = 0
 
         for i in range(batch_size):
             # Get valid response length for this sample
-            valid_len = response_mask[i].sum().item()
+            valid_len = int(response_mask[i].sum().item())
             if valid_len == 0:
                 continue
 
             # Student logits for response (shifted for next-token prediction)
             # Position student_prompt_len-1 predicts token at student_prompt_len
             s_start = student_prompt_len - 1
-            s_end = student_prompt_len + int(valid_len) - 1
+            s_end = student_prompt_len + valid_len - 1
             s_logits = student_logits[i, s_start:s_end, :]
 
             # Teacher logits for response
             t_start = teacher_prompt_len - 1
-            t_end = teacher_prompt_len + int(valid_len) - 1
+            t_end = teacher_prompt_len + valid_len - 1
             t_logits = teacher_logits[i, t_start:t_end, :]
 
             # Align lengths (should be same, but safety check)
@@ -454,11 +456,16 @@ class OnlineKDTrainer(Trainer):
             s_logits = s_logits[:min_len, :]
             t_logits = t_logits[:min_len, :]
 
-            # Compute divergence
+            # Compute divergence (returns per-token average, we weight by num tokens)
             loss = self._compute_divergence(s_logits, t_logits)
-            total_loss = total_loss + loss * min_len
+            losses.append(loss * min_len)
             total_tokens += min_len
 
+        # Sum up losses - if no valid tokens, return zero loss
+        if len(losses) == 0:
+            return torch.tensor(0.0, device=device, requires_grad=True), 0
+        
+        total_loss = torch.stack(losses).sum()
         return total_loss, total_tokens
 
     def _compute_divergence(
@@ -480,26 +487,34 @@ class OnlineKDTrainer(Trainer):
         s_logits = student_logits / self.temperature
         t_logits = teacher_logits / self.temperature
 
+        # Use log_softmax for numerical stability
         s_log_probs = F.log_softmax(s_logits, dim=-1)
-        t_probs = F.softmax(t_logits, dim=-1)
         t_log_probs = F.log_softmax(t_logits, dim=-1)
-        s_probs = F.softmax(s_logits, dim=-1)
 
         if self.kl_type == "forward":
-            # Forward KL: KL(teacher || student) = E_t[log(t/s)]
-            # Encourages student to cover all modes of teacher
-            kl = (t_probs * (t_log_probs - s_log_probs)).sum(dim=-1).mean()
+            # Forward KL: KL(teacher || student) = sum(t * (log_t - log_s))
+            # Use F.kl_div for numerical stability (expects log_probs as input)
+            # F.kl_div(input, target) computes sum(target * (log_target - input))
+            # So: kl_div(s_log_probs, t_probs) = sum(t * (log_t - s_log_probs))
+            t_probs = F.softmax(t_logits, dim=-1)
+            kl = F.kl_div(s_log_probs, t_probs, reduction='batchmean')
         elif self.kl_type == "reverse":
-            # Reverse KL: KL(student || teacher) = E_s[log(s/t)]
-            # Encourages student to focus on high-probability modes
-            kl = (s_probs * (s_log_probs - t_log_probs)).sum(dim=-1).mean()
+            # Reverse KL: KL(student || teacher) = sum(s * (log_s - log_t))
+            s_probs = F.softmax(s_logits, dim=-1)
+            kl = F.kl_div(t_log_probs, s_probs, reduction='batchmean')
         else:  # jsd
-            # Generalized JSD
+            # Generalized JSD with numerical stability
+            t_probs = F.softmax(t_logits, dim=-1)
+            s_probs = F.softmax(s_logits, dim=-1)
+            
+            # Mixture distribution with clamping for numerical stability
             m_probs = self.beta * t_probs + (1 - self.beta) * s_probs
+            m_probs = m_probs.clamp(min=1e-8)  # Prevent log(0)
             m_log_probs = m_probs.log()
 
-            kl_t_m = (t_probs * (t_log_probs - m_log_probs)).sum(dim=-1).mean()
-            kl_s_m = (s_probs * (s_log_probs - m_log_probs)).sum(dim=-1).mean()
+            # Compute KL divergences to mixture using F.kl_div
+            kl_t_m = F.kl_div(m_log_probs, t_probs, reduction='batchmean')
+            kl_s_m = F.kl_div(m_log_probs, s_probs, reduction='batchmean')
             kl = self.beta * kl_t_m + (1 - self.beta) * kl_s_m
 
         # Scale by temperature^2

@@ -131,7 +131,7 @@ def main():
 
     model = AutoModelForCausalLM.from_pretrained(
         model_config.get("student_path"),
-        torch_dtype=torch_dtype,
+        dtype=torch_dtype,
         trust_remote_code=model_config.get("trust_remote_code", True),
         attn_implementation=model_config.get(
             "attn_implementation", "flash_attention_2"),

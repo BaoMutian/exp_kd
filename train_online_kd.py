@@ -151,7 +151,7 @@ def main():
     logger.info("Loading student model...")
     student_model = AutoModelForCausalLM.from_pretrained(
         model_config.get("student_path"),
-        torch_dtype=torch_dtype,
+        dtype=torch_dtype,
         trust_remote_code=model_config.get("trust_remote_code", True),
         attn_implementation=model_config.get(
             "attn_implementation", "flash_attention_2"),
@@ -160,7 +160,7 @@ def main():
     logger.info("Loading teacher model...")
     teacher_model = AutoModelForCausalLM.from_pretrained(
         model_config.get("teacher_path"),
-        torch_dtype=torch_dtype,
+        dtype=torch_dtype,
         trust_remote_code=model_config.get("trust_remote_code", True),
         attn_implementation=model_config.get(
             "attn_implementation", "flash_attention_2"),
