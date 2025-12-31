@@ -22,13 +22,14 @@ Usage:
         --config configs/seqkd.yaml
 """
 
-from src.utils import load_config, get_torch_dtype
-from src.data import create_seqkd_dataset
 import argparse
 import logging
 import os
 import sys
 from pathlib import Path
+
+# Add src to path before importing local modules
+sys.path.insert(0, str(Path(__file__).parent))
 
 import torch
 from datasets import Dataset
@@ -36,8 +37,8 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
+from src.data import create_seqkd_dataset
+from src.utils import load_config, get_torch_dtype
 
 
 logging.basicConfig(

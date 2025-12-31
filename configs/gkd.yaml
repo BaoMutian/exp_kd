@@ -50,10 +50,6 @@ training:
   
   # Learning rate
   learning_rate: 1.0e-5
-  
-  # Evaluation settings
-  eval_strategy: "steps"
-  eval_steps: 200
 
 # Generation settings for on-policy sampling (Qwen3 non-thinking mode)
 generation:

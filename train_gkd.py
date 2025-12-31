@@ -28,21 +28,30 @@ Usage:
         --config configs/gkd.yaml
 """
 
-from src.utils import load_config, get_torch_dtype
-from src.data import create_gkd_dataset
 import argparse
 import logging
 import os
 import sys
 from pathlib import Path
 
+# Add src to path before importing local modules
+sys.path.insert(0, str(Path(__file__).parent))
+
 import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
-from trl.experimental.gkd import GKDConfig, GKDTrainer
 
-# Add src to path
-sys.path.insert(0, str(Path(__file__).parent))
+# TRL GKD imports - handle different TRL versions
+try:
+    from trl import GKDConfig, GKDTrainer
+except ImportError:
+    try:
+        from trl.trainer.gkd_trainer import GKDConfig, GKDTrainer
+    except ImportError:
+        from trl.experimental.gkd import GKDConfig, GKDTrainer
+
+from src.data import create_gkd_dataset
+from src.utils import load_config, get_torch_dtype
 
 
 logging.basicConfig(
