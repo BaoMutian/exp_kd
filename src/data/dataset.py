@@ -99,26 +99,37 @@ def create_seqkd_dataset(
     Create dataset for SeqKD (Sequence-Level KD).
     
     SeqKD trains the student model with:
-    - Input: student's system prompt + user message (Q, no experience)
-    - Target: teacher's assistant response (high-quality A)
+    - Input (prompt): student's system prompt + user message (Q, no experience)
+    - Target (completion): teacher's assistant response (high-quality A)
     
-    This is essentially SFT on teacher outputs with student inputs.
+    Uses prompt-completion format to ensure loss is only computed on completion.
     
     Args:
         teacher_data_path: Path to teacher dataset
         student_data_path: Path to student dataset
         
     Returns:
-        HuggingFace Dataset with 'messages' column
+        HuggingFace Dataset with 'prompt' and 'completion' columns (conversational format)
     """
     teacher_data, student_data = load_kd_dataset(teacher_data_path, student_data_path)
     kd_dataset = KDDataset(teacher_data, student_data)
     
-    # Create dataset with student input + teacher output
+    # Create dataset with prompt-completion format (conversational style)
     data = []
     for idx in range(len(kd_dataset)):
-        messages = kd_dataset.get_student_messages(idx)
-        data.append({"messages": messages})
+        student_msgs = student_data[idx]["messages"]
+        teacher_msgs = teacher_data[idx]["messages"]
+        
+        # Prompt: all non-assistant messages from student (no experience)
+        prompt_messages = [msg for msg in student_msgs if msg["role"] != "assistant"]
+        
+        # Completion: assistant message from teacher (high-quality response)
+        completion_messages = [msg for msg in teacher_msgs if msg["role"] == "assistant"]
+        
+        data.append({
+            "prompt": prompt_messages,
+            "completion": completion_messages,
+        })
     
     return Dataset.from_list(data)
 
@@ -173,6 +184,11 @@ def create_gkd_dataset(
     
     For on-policy part, the trainer will generate outputs from the student.
     
+    NOTE: In on-policy mode (lmbda > 0), the teacher model uses the same input
+    as the student (without experience E). This is a limitation of TRL's GKDTrainer.
+    For best results with our experience internalization task, use lmbda=0 (pure supervised)
+    or consider using SKD instead.
+    
     Args:
         teacher_data_path: Path to teacher dataset
         student_data_path: Path to student dataset
@@ -180,8 +196,16 @@ def create_gkd_dataset(
     Returns:
         HuggingFace Dataset with 'messages' column
     """
-    # GKD uses the same format as SeqKD for the supervised component
-    return create_seqkd_dataset(teacher_data_path, student_data_path)
+    teacher_data, student_data = load_kd_dataset(teacher_data_path, student_data_path)
+    kd_dataset = KDDataset(teacher_data, student_data)
+    
+    # Create dataset with student input + teacher output (messages format for GKD)
+    data = []
+    for idx in range(len(kd_dataset)):
+        messages = kd_dataset.get_student_messages(idx)
+        data.append({"messages": messages})
+    
+    return Dataset.from_list(data)
 
 
 def prepare_chat_format(

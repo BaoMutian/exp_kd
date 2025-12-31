@@ -14,10 +14,16 @@ model:
 # GKD specific settings (following TRL GKDConfig)
 gkd:
   # Lambda: controls the student data fraction (on-policy ratio)
-  # lmbda=0.0: supervised JSD (like SKD, train on ground-truth)
+  # lmbda=0.0: supervised JSD (train on ground-truth teacher responses)
   # lmbda=1.0: on-policy JSD (train on student-generated outputs)
   # lmbda=0.5: mix of both
-  lmbda: 0.5
+  #
+  # IMPORTANT for experience internalization:
+  # In on-policy mode (lmbda > 0), the teacher model uses the SAME input as
+  # the student (without experience E). This is a TRL limitation.
+  # For best results, use lmbda=0.0 (pure supervised) to learn from
+  # high-quality teacher responses generated with experience E.
+  lmbda: 0.0
   
   # Beta: interpolation in generalized Jensen-Shannon Divergence
   # beta=0.0: approximates forward KL divergence
@@ -50,6 +56,10 @@ training:
   
   # Learning rate
   learning_rate: 1.0e-5
+  
+  # Evaluation settings (no eval dataset provided by default)
+  eval_strategy: "no"
+  eval_steps: 200
 
 # Generation settings for on-policy sampling (Qwen3 non-thinking mode)
 generation:

@@ -22,14 +22,13 @@ Usage:
         --config configs/seqkd.yaml
 """
 
+from src.utils import load_config, get_torch_dtype
+from src.data import create_seqkd_dataset
 import argparse
 import logging
 import os
 import sys
 from pathlib import Path
-
-# Add src to path before importing local modules
-sys.path.insert(0, str(Path(__file__).parent))
 
 import torch
 from datasets import Dataset
@@ -37,8 +36,8 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 
-from src.data import create_seqkd_dataset
-from src.utils import load_config, get_torch_dtype
+# Add src to path
+sys.path.insert(0, str(Path(__file__).parent))
 
 
 logging.basicConfig(
@@ -198,27 +197,17 @@ def main():
         packing=sft_config.get("packing", False),
     )
 
-    # Custom chat template function for Qwen3 non-thinking mode
-    def formatting_func(example):
-        """Format messages using Qwen3 chat template with non-thinking mode."""
-        messages = example["messages"]
-        # Apply chat template with non-thinking mode
-        text = tokenizer.apply_chat_template(
-            messages,
-            tokenize=False,
-            add_generation_prompt=False,
-            enable_thinking=model_config.get("enable_thinking", False),
-        )
-        return text
-
     # Initialize trainer
+    # Dataset uses prompt-completion format (conversational style)
+    # TRL will automatically:
+    # 1. Apply chat template to format the conversation
+    # 2. Compute loss only on completion tokens (assistant response)
     logger.info("Initializing SFTTrainer...")
     trainer = SFTTrainer(
         model=model,
         args=sft_training_args,
         train_dataset=train_dataset,
         processing_class=tokenizer,
-        formatting_func=formatting_func,
     )
 
     # Train
