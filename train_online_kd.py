@@ -58,6 +58,8 @@ def parse_args():
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--max_new_tokens", type=int, default=None)
+    parser.add_argument("--num_samples", type=int, default=None,
+                        help="Number of responses to sample from student per input")
     parser.add_argument("--kl_type", type=str, 
                         choices=["forward", "reverse", "jsd"], default=None)
     parser.add_argument("--beta", type=float, default=None)
@@ -87,6 +89,8 @@ def main():
         config["online_kd"]["temperature"] = args.temperature
     if args.max_new_tokens is not None:
         config["online_kd"]["max_new_tokens"] = args.max_new_tokens
+    if args.num_samples is not None:
+        config["online_kd"]["num_samples"] = args.num_samples
     if args.kl_type is not None:
         config["online_kd"]["kl_type"] = args.kl_type
     if args.beta is not None:
@@ -105,6 +109,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Online KD specific parameters
+    num_samples = online_kd_config.get("num_samples", 1)
     temperature = online_kd_config.get("temperature", 1.0)
     max_new_tokens = online_kd_config.get("max_new_tokens", 256)
     kl_type = online_kd_config.get("kl_type", "jsd")
@@ -116,6 +121,7 @@ def main():
     logger.info(f"Student model: {model_config.get('student_path')}")
     logger.info(f"Teacher model: {model_config.get('teacher_path')}")
     logger.info(f"Output directory: {output_dir}")
+    logger.info(f"Num samples per input: {num_samples}")
     logger.info(f"Temperature: {temperature}")
     logger.info(f"Max new tokens: {max_new_tokens}")
     logger.info(f"KL type: {kl_type}")
@@ -232,6 +238,7 @@ def main():
         data_collator=data_collator,
         temperature=temperature,
         max_new_tokens=max_new_tokens,
+        num_samples=num_samples,
         generation_config=generation_config,
         kl_type=kl_type,
         beta=beta,

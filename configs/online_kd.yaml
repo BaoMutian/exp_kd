@@ -12,6 +12,11 @@ model:
 
 # Online KD specific settings
 online_kd:
+  # Number of responses to sample from student per input
+  # Higher values = more diverse training signal, but slower
+  # Recommended: 1-4
+  num_samples: 1
+  
   # Temperature for KL divergence computation
   temperature: 1.0
   
@@ -19,8 +24,8 @@ online_kd:
   max_new_tokens: 256
   
   # Divergence type
-  # "forward": KL(teacher || student) - mean-seeking
-  # "reverse": KL(student || teacher) - mode-seeking
+  # "forward": KL(teacher || student) - mean-seeking, covers all modes
+  # "reverse": KL(student || teacher) - mode-seeking, focuses on high-prob
   # "jsd": Generalized Jensen-Shannon Divergence
   kl_type: "jsd"
   

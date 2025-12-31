@@ -2,19 +2,22 @@
 Online Knowledge Distillation Trainer for Experience Internalization
 
 This trainer implements on-policy distillation where:
-- Student model: receives Q (without experience) and generates responses A
-- Teacher model: receives Q+E (with experience) and generates high-quality responses A'
-- The student learns to match the teacher's output distribution
+- Student model: receives Q (without experience), samples N responses
+- Teacher model: receives Q+E (with experience), evaluates student's responses
+- Student learns to match teacher's distribution on its own samples
 
-Key difference from TRL's GKDTrainer:
-- Teacher and student use DIFFERENT inputs (teacher has experience E)
-- This enables true experience internalization through on-policy learning
+This is the standard on-policy KD approach, but with a key difference:
+- Teacher uses Q+E (with experience) to evaluate student's responses
+- This enables true experience internalization
 
 Training process:
-1. For each batch, student generates responses A given input Q
-2. Teacher generates responses A' given input Q+E (or evaluates A with Q+E context)
-3. Compute KL divergence loss between student's A and teacher's A'
+1. For each input Q, student samples N responses A₁, A₂, ..., Aₙ
+2. Teacher evaluates each response using Q+E context, computing P(Aᵢ|Q+E)
+3. Student learns to match teacher's evaluation: P(Aᵢ|Q) → P(Aᵢ|Q+E)
 4. Update student model
+
+Key insight: By training on student's own samples with teacher's Q+E feedback,
+the student internalizes the experience E into its weights.
 """
 
 import torch
@@ -108,24 +111,24 @@ class OnlineKDDataCollator:
             teacher_encodings.append(teacher_enc)
             student_encodings.append(student_enc)
         
-        # Pad teacher inputs
+        # Pad teacher inputs (left padding for generation)
         max_teacher_len = max(len(e["input_ids"]) for e in teacher_encodings)
         teacher_input_ids = []
         teacher_attention_mask = []
         for enc in teacher_encodings:
             padding_len = max_teacher_len - len(enc["input_ids"])
-            # Left padding for generation
-            teacher_input_ids.append([self.tokenizer.pad_token_id] * padding_len + enc["input_ids"])
+            teacher_input_ids.append(
+                [self.tokenizer.pad_token_id] * padding_len + enc["input_ids"])
             teacher_attention_mask.append([0] * padding_len + enc["attention_mask"])
         
-        # Pad student inputs
+        # Pad student inputs (left padding for generation)
         max_student_len = max(len(e["input_ids"]) for e in student_encodings)
         student_input_ids = []
         student_attention_mask = []
         for enc in student_encodings:
             padding_len = max_student_len - len(enc["input_ids"])
-            # Left padding for generation
-            student_input_ids.append([self.tokenizer.pad_token_id] * padding_len + enc["input_ids"])
+            student_input_ids.append(
+                [self.tokenizer.pad_token_id] * padding_len + enc["input_ids"])
             student_attention_mask.append([0] * padding_len + enc["attention_mask"])
         
         return {
@@ -140,14 +143,12 @@ class OnlineKDTrainer(Trainer):
     """
     Online Knowledge Distillation Trainer for Experience Internalization.
     
-    This trainer implements on-policy distillation where the student generates
-    responses and learns from the teacher's distribution on the same responses.
+    Implements true on-policy distillation:
+    1. Student samples N responses given Q (without experience)
+    2. Teacher evaluates each response using Q+E (with experience)
+    3. Student learns to match teacher's evaluation on its own samples
     
-    Key feature: Teacher uses Q+E (with experience), Student uses Q (without experience)
-    
-    Training modes:
-    1. Teacher generates A': Student learns to match teacher's generation
-    2. Teacher evaluates student's A: Student learns from teacher's feedback on its own output
+    Key feature: Teacher uses Q+E to evaluate, enabling experience internalization.
     """
     
     def __init__(
@@ -161,6 +162,7 @@ class OnlineKDTrainer(Trainer):
         data_collator: Optional[OnlineKDDataCollator] = None,
         temperature: float = 1.0,
         max_new_tokens: int = 256,
+        num_samples: int = 1,  # Number of samples per input
         generation_config: Optional[Dict[str, Any]] = None,
         kl_type: str = "forward",  # "forward", "reverse", or "jsd"
         beta: float = 0.5,  # For JSD interpolation
@@ -176,8 +178,9 @@ class OnlineKDTrainer(Trainer):
             train_dataset: Training dataset with teacher_messages and student_messages
             tokenizer: Tokenizer
             data_collator: Data collator
-            temperature: Temperature for generation and KL computation
+            temperature: Temperature for KL computation
             max_new_tokens: Maximum tokens to generate
+            num_samples: Number of responses to sample per input (N)
             generation_config: Generation configuration dict
             kl_type: Type of divergence ("forward", "reverse", "jsd")
             beta: Interpolation coefficient for JSD (0=forward KL, 1=reverse KL)
@@ -196,10 +199,11 @@ class OnlineKDTrainer(Trainer):
         self.tokenizer = tokenizer
         self.temperature = temperature
         self.max_new_tokens = max_new_tokens
+        self.num_samples = num_samples
         self.kl_type = kl_type
         self.beta = beta
         
-        # Generation config for on-policy sampling
+        # Generation config for student sampling
         self.generation_config = GenerationConfig(
             max_new_tokens=max_new_tokens,
             do_sample=True,
@@ -208,42 +212,80 @@ class OnlineKDTrainer(Trainer):
             top_k=generation_config.get("top_k", 20) if generation_config else 20,
             pad_token_id=tokenizer.pad_token_id,
             eos_token_id=tokenizer.eos_token_id,
+            num_return_sequences=1,  # We'll loop for multiple samples
         )
         
         # Freeze teacher model
         self.teacher_model.eval()
         for param in self.teacher_model.parameters():
             param.requires_grad = False
+        
+        logger.info(f"OnlineKDTrainer initialized with num_samples={num_samples}")
     
-    def _generate_responses(
+    def _sample_from_student(
         self,
         model: PreTrainedModel,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
+    ) -> List[Tuple[torch.Tensor, torch.Tensor]]:
+        """
+        Sample N responses from student model.
+        
+        Args:
+            model: Student model
+            input_ids: Prompt input IDs [batch_size, prompt_len]
+            attention_mask: Prompt attention mask
+            
+        Returns:
+            List of (generated_ids, attention_mask) tuples, length = num_samples
+            Each generated_ids is [batch_size, prompt_len + response_len]
+        """
+        samples = []
+        
+        for _ in range(self.num_samples):
+            with torch.no_grad():
+                outputs = model.generate(
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
+                    generation_config=self.generation_config,
+                    return_dict_in_generate=True,
+                    output_scores=False,
+                )
+            
+            generated_ids = outputs.sequences
+            generated_mask = torch.ones_like(generated_ids)
+            generated_mask[generated_ids == self.tokenizer.pad_token_id] = 0
+            
+            samples.append((generated_ids, generated_mask))
+        
+        return samples
+    
+    def _prepare_teacher_input_with_response(
+        self,
+        teacher_prompt_ids: torch.Tensor,
+        teacher_prompt_mask: torch.Tensor,
+        student_response_ids: torch.Tensor,
+        student_response_mask: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
-        Generate responses from a model.
+        Concatenate teacher prompt (Q+E) with student's sampled response.
         
+        This allows teacher to evaluate the student's response with experience context.
+        
+        Args:
+            teacher_prompt_ids: [batch_size, teacher_prompt_len]
+            teacher_prompt_mask: [batch_size, teacher_prompt_len]
+            student_response_ids: [batch_size, response_len]
+            student_response_mask: [batch_size, response_len]
+            
         Returns:
-            Tuple of (generated_ids, generated_attention_mask)
-            generated_ids includes the prompt + generated tokens
+            (full_ids, full_mask) for teacher evaluation
         """
-        with torch.no_grad():
-            outputs = model.generate(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                generation_config=self.generation_config,
-                return_dict_in_generate=True,
-                output_scores=False,
-            )
+        # Concatenate: teacher_prompt + student_response
+        full_ids = torch.cat([teacher_prompt_ids, student_response_ids], dim=1)
+        full_mask = torch.cat([teacher_prompt_mask, student_response_mask], dim=1)
         
-        generated_ids = outputs.sequences
-        # Create attention mask for generated sequence
-        generated_attention_mask = torch.ones_like(generated_ids)
-        # Mask padding tokens
-        generated_attention_mask[generated_ids == self.tokenizer.pad_token_id] = 0
-        
-        return generated_ids, generated_attention_mask
+        return full_ids, full_mask
     
     def compute_loss(
         self,
@@ -253,89 +295,149 @@ class OnlineKDTrainer(Trainer):
         num_items_in_batch: Optional[int] = None,
     ) -> Union[torch.Tensor, Tuple[torch.Tensor, Any]]:
         """
-        Compute Online KD loss.
+        Compute Online KD loss with on-policy sampling.
         
         Process:
-        1. Student generates responses A given Q
-        2. Teacher generates responses A' given Q+E
-        3. Compute divergence loss between student's P(A|Q) and teacher's P(A'|Q+E)
+        1. Student samples N responses given Q (without experience)
+        2. For each sample:
+           - Student computes P(response|Q)
+           - Teacher computes P(response|Q+E)
+           - Compute KL divergence
+        3. Average loss across all samples
         """
-        teacher_input_ids = inputs["teacher_input_ids"]
-        teacher_attention_mask = inputs["teacher_attention_mask"]
-        student_input_ids = inputs["student_input_ids"]
-        student_attention_mask = inputs["student_attention_mask"]
+        teacher_prompt_ids = inputs["teacher_input_ids"]
+        teacher_prompt_mask = inputs["teacher_attention_mask"]
+        student_prompt_ids = inputs["student_input_ids"]
+        student_prompt_mask = inputs["student_attention_mask"]
         
-        batch_size = student_input_ids.size(0)
-        device = student_input_ids.device
+        batch_size = student_prompt_ids.size(0)
+        student_prompt_len = student_prompt_ids.size(1)
+        teacher_prompt_len = teacher_prompt_ids.size(1)
+        device = student_prompt_ids.device
         
-        # Step 1: Generate responses from teacher (with experience)
-        teacher_gen_ids, teacher_gen_mask = self._generate_responses(
-            self.teacher_model,
-            teacher_input_ids,
-            teacher_attention_mask,
+        # Step 1: Student samples N responses
+        student_samples = self._sample_from_student(
+            model,  # Use the current student model for sampling
+            student_prompt_ids,
+            student_prompt_mask,
         )
         
-        # Get only the generated part (after prompt)
-        teacher_prompt_len = teacher_input_ids.size(1)
-        teacher_response_ids = teacher_gen_ids[:, teacher_prompt_len:]
-        teacher_response_mask = teacher_gen_mask[:, teacher_prompt_len:]
-        
-        # Step 2: Prepare student input with teacher's response
-        # Concatenate student prompt with teacher's response for computing logits
-        student_prompt_len = student_input_ids.size(1)
-        
-        # Align response length
-        max_response_len = teacher_response_ids.size(1)
-        
-        # Create full sequence for student: student_prompt + teacher_response
-        student_full_ids = torch.cat([student_input_ids, teacher_response_ids], dim=1)
-        student_full_mask = torch.cat([student_attention_mask, teacher_response_mask], dim=1)
-        
-        # Create full sequence for teacher: teacher_prompt + teacher_response
-        teacher_full_ids = teacher_gen_ids
-        teacher_full_mask = teacher_gen_mask
-        
-        # Step 3: Compute logits for both models on the response
-        # Student: P(response | student_prompt)
-        student_outputs = model(
-            input_ids=student_full_ids,
-            attention_mask=student_full_mask,
-        )
-        student_logits = student_outputs.logits
-        
-        # Teacher: P(response | teacher_prompt)
-        with torch.no_grad():
-            teacher_outputs = self.teacher_model(
-                input_ids=teacher_full_ids,
-                attention_mask=teacher_full_mask,
-            )
-            teacher_logits = teacher_outputs.logits
-        
-        # Step 4: Compute KL divergence on response tokens only
-        # Extract logits for response positions
-        # For student: positions [student_prompt_len : student_prompt_len + response_len]
-        # For teacher: positions [teacher_prompt_len : teacher_prompt_len + response_len]
-        
-        total_loss = torch.tensor(0.0, device=device)
+        total_loss = torch.tensor(0.0, device=device, requires_grad=True)
         total_tokens = 0
+        num_valid_samples = 0
         
-        for i in range(batch_size):
-            # Get response length for this sample
-            response_len = teacher_response_mask[i].sum().item()
+        # Step 2: For each sample, compute KL loss
+        for sample_idx, (student_full_ids, student_full_mask) in enumerate(student_samples):
+            # Extract response part from student's generation
+            response_ids = student_full_ids[:, student_prompt_len:]
+            response_mask = student_full_mask[:, student_prompt_len:]
+            
+            response_len = response_ids.size(1)
             if response_len == 0:
                 continue
             
-            # Student logits for response positions (shifted for next-token prediction)
-            s_start = student_prompt_len - 1  # -1 for next-token prediction
-            s_end = student_prompt_len + int(response_len) - 1
+            # Prepare teacher input: teacher_prompt (Q+E) + student_response
+            teacher_full_ids, teacher_full_mask = self._prepare_teacher_input_with_response(
+                teacher_prompt_ids,
+                teacher_prompt_mask,
+                response_ids,
+                response_mask,
+            )
+            
+            # Step 3: Compute logits
+            # Student: P(response | Q)
+            student_outputs = model(
+                input_ids=student_full_ids,
+                attention_mask=student_full_mask,
+            )
+            student_logits = student_outputs.logits
+            
+            # Teacher: P(response | Q+E)
+            with torch.no_grad():
+                teacher_outputs = self.teacher_model(
+                    input_ids=teacher_full_ids,
+                    attention_mask=teacher_full_mask,
+                )
+                teacher_logits = teacher_outputs.logits
+            
+            # Step 4: Compute KL on response tokens
+            sample_loss, sample_tokens = self._compute_sample_loss(
+                student_logits=student_logits,
+                teacher_logits=teacher_logits,
+                student_prompt_len=student_prompt_len,
+                teacher_prompt_len=teacher_prompt_len,
+                response_mask=response_mask,
+            )
+            
+            if sample_tokens > 0:
+                total_loss = total_loss + sample_loss
+                total_tokens += sample_tokens
+                num_valid_samples += 1
+        
+        # Average across samples and tokens
+        if total_tokens > 0:
+            avg_loss = total_loss / total_tokens
+        else:
+            avg_loss = total_loss
+        
+        # Log losses
+        if self.state.global_step % self.args.logging_steps == 0:
+            self.log({
+                "kd_loss": avg_loss.item() if torch.is_tensor(avg_loss) else avg_loss,
+                "num_samples": num_valid_samples,
+                "total_tokens": total_tokens,
+            })
+        
+        if return_outputs:
+            return avg_loss, None
+        return avg_loss
+    
+    def _compute_sample_loss(
+        self,
+        student_logits: torch.Tensor,
+        teacher_logits: torch.Tensor,
+        student_prompt_len: int,
+        teacher_prompt_len: int,
+        response_mask: torch.Tensor,
+    ) -> Tuple[torch.Tensor, int]:
+        """
+        Compute KL divergence loss for a single sample.
+        
+        Args:
+            student_logits: [batch_size, student_seq_len, vocab_size]
+            teacher_logits: [batch_size, teacher_seq_len, vocab_size]
+            student_prompt_len: Length of student prompt
+            teacher_prompt_len: Length of teacher prompt
+            response_mask: [batch_size, response_len]
+            
+        Returns:
+            (loss, num_tokens)
+        """
+        batch_size = student_logits.size(0)
+        response_len = response_mask.size(1)
+        device = student_logits.device
+        
+        total_loss = torch.tensor(0.0, device=device, requires_grad=True)
+        total_tokens = 0
+        
+        for i in range(batch_size):
+            # Get valid response length for this sample
+            valid_len = response_mask[i].sum().item()
+            if valid_len == 0:
+                continue
+            
+            # Student logits for response (shifted for next-token prediction)
+            # Position student_prompt_len-1 predicts token at student_prompt_len
+            s_start = student_prompt_len - 1
+            s_end = student_prompt_len + int(valid_len) - 1
             s_logits = student_logits[i, s_start:s_end, :]
             
-            # Teacher logits for response positions
+            # Teacher logits for response
             t_start = teacher_prompt_len - 1
-            t_end = teacher_prompt_len + int(response_len) - 1
+            t_end = teacher_prompt_len + int(valid_len) - 1
             t_logits = teacher_logits[i, t_start:t_end, :]
             
-            # Align lengths
+            # Align lengths (should be same, but safety check)
             min_len = min(s_logits.size(0), t_logits.size(0))
             if min_len == 0:
                 continue
@@ -348,18 +450,7 @@ class OnlineKDTrainer(Trainer):
             total_loss = total_loss + loss * min_len
             total_tokens += min_len
         
-        if total_tokens > 0:
-            total_loss = total_loss / total_tokens
-        
-        # Log losses
-        if self.state.global_step % self.args.logging_steps == 0:
-            self.log({
-                "kd_loss": total_loss.item() if torch.is_tensor(total_loss) else total_loss,
-            })
-        
-        if return_outputs:
-            return total_loss, student_outputs
-        return total_loss
+        return total_loss, total_tokens
     
     def _compute_divergence(
         self,
@@ -374,7 +465,7 @@ class OnlineKDTrainer(Trainer):
             teacher_logits: [seq_len, vocab_size]
             
         Returns:
-            Scalar loss value
+            Scalar loss value (per token)
         """
         # Apply temperature
         s_logits = student_logits / self.temperature
@@ -386,19 +477,20 @@ class OnlineKDTrainer(Trainer):
         s_probs = F.softmax(s_logits, dim=-1)
         
         if self.kl_type == "forward":
-            # Forward KL: KL(teacher || student)
-            kl = F.kl_div(s_log_probs, t_probs, reduction="batchmean")
+            # Forward KL: KL(teacher || student) = E_t[log(t/s)]
+            # Encourages student to cover all modes of teacher
+            kl = (t_probs * (t_log_probs - s_log_probs)).sum(dim=-1).mean()
         elif self.kl_type == "reverse":
-            # Reverse KL: KL(student || teacher)
-            kl = F.kl_div(t_log_probs, s_probs, reduction="batchmean")
+            # Reverse KL: KL(student || teacher) = E_s[log(s/t)]
+            # Encourages student to focus on high-probability modes
+            kl = (s_probs * (s_log_probs - t_log_probs)).sum(dim=-1).mean()
         else:  # jsd
-            # Generalized JSD: beta * KL(t||m) + (1-beta) * KL(s||m)
-            # where m = beta * t + (1-beta) * s
+            # Generalized JSD
             m_probs = self.beta * t_probs + (1 - self.beta) * s_probs
             m_log_probs = m_probs.log()
             
-            kl_t_m = F.kl_div(m_log_probs, t_probs, reduction="batchmean")
-            kl_s_m = F.kl_div(m_log_probs, s_probs, reduction="batchmean")
+            kl_t_m = (t_probs * (t_log_probs - m_log_probs)).sum(dim=-1).mean()
+            kl_s_m = (s_probs * (s_log_probs - m_log_probs)).sum(dim=-1).mean()
             kl = self.beta * kl_t_m + (1 - self.beta) * kl_s_m
         
         # Scale by temperature^2
@@ -417,4 +509,3 @@ class OnlineKDTrainer(Trainer):
                 self.teacher_model = self.teacher_model.to(device)
         
         return inputs
-
