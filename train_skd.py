@@ -25,10 +25,6 @@ Usage:
         --config configs/skd.yaml
 """
 
-from src.utils import load_config, get_torch_dtype
-from src.trainers.skd_trainer import SKDDataCollator
-from src.trainers import SKDTrainer
-from src.data import create_skd_dataset
 import argparse
 import logging
 import os
@@ -39,8 +35,13 @@ import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 
-# Add src to path
+# Add project root to path for local imports
 sys.path.insert(0, str(Path(__file__).parent))
+
+from src.utils import load_config, get_torch_dtype
+from src.trainers.skd_trainer import SKDDataCollator
+from src.trainers import SKDTrainer
+from src.data import create_skd_dataset
 
 
 logging.basicConfig(

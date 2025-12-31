@@ -28,8 +28,6 @@ Usage:
         --config configs/gkd.yaml
 """
 
-from src.utils import load_config, get_torch_dtype
-from src.data import create_gkd_dataset
 import argparse
 import logging
 import os
@@ -41,8 +39,11 @@ from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl.experimental.gkd import GKDConfig, GKDTrainer
 
-# Add src to path
+# Add project root to path for local imports
 sys.path.insert(0, str(Path(__file__).parent))
+
+from src.utils import load_config, get_torch_dtype
+from src.data import create_gkd_dataset
 
 
 logging.basicConfig(
