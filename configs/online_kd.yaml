@@ -21,7 +21,10 @@ online_kd:
   temperature: 1.0
   
   # Maximum tokens to generate per response
-  max_new_tokens: 1024
+  # WARNING: Large values cause very slow training due to autoregressive generation
+  # Each token requires one full forward pass!
+  # Recommended: 128-256 for reasonable training speed
+  max_new_tokens: 128
   
   # Divergence type
   # "forward": KL(teacher || student) - mean-seeking, covers all modes
