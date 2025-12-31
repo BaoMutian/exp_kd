@@ -21,7 +21,7 @@ online_kd:
   temperature: 1.0
   
   # Maximum tokens to generate per response
-  max_new_tokens: 256
+  max_new_tokens: 1024
   
   # Divergence type
   # "forward": KL(teacher || student) - mean-seeking, covers all modes
