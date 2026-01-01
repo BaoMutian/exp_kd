@@ -54,6 +54,11 @@ training:
   # Standard gradient clipping
   max_grad_norm: 1.0
 
+  # IMPORTANT: Disable gradient checkpointing for On-Policy KD
+  # Gradient checkpointing is incompatible with model.generate()
+  # and can cause CUDA errors during generation
+  gradient_checkpointing: false
+
   # Logging more frequently to monitor generation quality
   logging_steps: 5
 

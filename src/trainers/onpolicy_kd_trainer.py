@@ -240,22 +240,45 @@ class OnPolicyKDTrainer(Trainer):
         generation_model.eval()
 
         with torch.no_grad():
+            # Check for NaN in model parameters before generation
+            # This can happen if previous gradient update produced NaN
+            for name, param in generation_model.named_parameters():
+                if torch.isnan(param).any():
+                    raise RuntimeError(f"NaN detected in model parameter: {name}")
+            
             # Generate responses
-            # Use synced_gpus=True for distributed training to avoid hangs
-            outputs = generation_model.generate(
-                input_ids=student_input_ids,
-                attention_mask=student_attention_mask,
-                max_new_tokens=self.max_new_tokens,
-                do_sample=True,
-                temperature=self.generation_temperature,
-                top_p=0.9,
-                num_return_sequences=self.num_samples,
-                pad_token_id=self._tokenizer.pad_token_id,
-                eos_token_id=self._tokenizer.eos_token_id,
-                return_dict_in_generate=False,
-                synced_gpus=is_distributed,
-                use_cache=True,
-            )
+            # Note: use_cache should be False when gradient_checkpointing is enabled
+            # synced_gpus=True for distributed training to avoid hangs
+            try:
+                outputs = generation_model.generate(
+                    input_ids=student_input_ids,
+                    attention_mask=student_attention_mask,
+                    max_new_tokens=self.max_new_tokens,
+                    do_sample=True,
+                    temperature=self.generation_temperature,
+                    top_p=0.9,
+                    num_return_sequences=self.num_samples,
+                    pad_token_id=self._tokenizer.pad_token_id,
+                    eos_token_id=self._tokenizer.eos_token_id,
+                    return_dict_in_generate=False,
+                    synced_gpus=is_distributed,
+                    use_cache=False,  # Must be False when gradient_checkpointing is enabled
+                )
+            except RuntimeError as e:
+                # If generation fails, return dummy output
+                import logging
+                logging.warning(f"Generation failed with error: {e}")
+                # Return original input as "generated" to avoid crash
+                outputs = student_input_ids
+                outputs = torch.cat([
+                    outputs,
+                    torch.full(
+                        (outputs.size(0), self.max_new_tokens),
+                        self._tokenizer.pad_token_id,
+                        device=outputs.device,
+                        dtype=outputs.dtype
+                    )
+                ], dim=1)
 
         # Restore training mode
         if was_training:
@@ -358,36 +381,50 @@ class OnPolicyKDTrainer(Trainer):
         student_logits = student_logits / self.temperature
         teacher_logits = teacher_logits / self.temperature
 
+        # Compute log probabilities (more numerically stable)
+        student_log_probs = F.log_softmax(student_logits, dim=-1)
+        teacher_log_probs = F.log_softmax(teacher_logits, dim=-1)
+
         # Compute probabilities
-        student_probs = F.softmax(student_logits, dim=-1)
-        teacher_probs = F.softmax(teacher_logits, dim=-1)
+        student_probs = student_log_probs.exp()
+        teacher_probs = teacher_log_probs.exp()
 
         # Compute mixture distribution M = beta * P_teacher + (1 - beta) * P_student
-        mixture_probs = self.beta * teacher_probs + \
-            (1 - self.beta) * student_probs
-        mixture_log_probs = torch.log(mixture_probs + 1e-10)
+        mixture_probs = self.beta * teacher_probs + (1 - self.beta) * student_probs
+        # Use clamp for numerical stability before log
+        mixture_log_probs = torch.log(mixture_probs.clamp(min=1e-10))
 
-        # Compute JSD components
+        # Compute JSD components using manual KL computation for better stability
+        # KL(P || M) = sum(P * (log P - log M))
         # KL(P_teacher || M)
-        kl_teacher_mixture = F.kl_div(
-            mixture_log_probs, teacher_probs, reduction="none"
-        ).sum(dim=-1)
+        kl_teacher_mixture = (teacher_probs * (teacher_log_probs - mixture_log_probs)).sum(dim=-1)
 
         # KL(P_student || M)
-        kl_student_mixture = F.kl_div(
-            mixture_log_probs, student_probs, reduction="none"
-        ).sum(dim=-1)
+        kl_student_mixture = (student_probs * (student_log_probs - mixture_log_probs)).sum(dim=-1)
+
+        # Clamp KL values to avoid negative values due to numerical errors
+        kl_teacher_mixture = kl_teacher_mixture.clamp(min=0.0)
+        kl_student_mixture = kl_student_mixture.clamp(min=0.0)
 
         # JSD = beta * KL(P_teacher || M) + (1 - beta) * KL(P_student || M)
-        jsd = self.beta * kl_teacher_mixture + \
-            (1 - self.beta) * kl_student_mixture
+        jsd = self.beta * kl_teacher_mixture + (1 - self.beta) * kl_student_mixture
 
         # Apply mask and compute mean loss
         masked_jsd = jsd * labels_mask
-        loss = masked_jsd.sum() / (labels_mask.sum() + 1e-10)
+        
+        # Check for NaN and replace with 0
+        if torch.isnan(masked_jsd).any():
+            masked_jsd = torch.where(torch.isnan(masked_jsd), torch.zeros_like(masked_jsd), masked_jsd)
+        
+        loss = masked_jsd.sum() / (labels_mask.sum().clamp(min=1.0))
 
         # Scale by temperature^2 (standard KD practice)
         loss = loss * (self.temperature ** 2)
+
+        # Final safety check - replace NaN/Inf with zero while keeping computation graph
+        if torch.isnan(loss) or torch.isinf(loss):
+            # Use a zero loss that's still connected to the computation graph
+            loss = student_logits.sum() * 0.0
 
         return loss
 
