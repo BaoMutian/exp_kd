@@ -22,6 +22,7 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
+from transformers.modeling_utils import unwrap_model
 from torch.utils.data import Dataset
 
 
@@ -196,12 +197,22 @@ class OnPolicyKDTrainer(Trainer):
         self.max_new_tokens = max_new_tokens
         self.generation_temperature = generation_temperature
         self.num_samples = num_samples
-        self.tokenizer = tokenizer
+        # Store tokenizer with a different name to avoid deprecation warning
+        self._tokenizer = tokenizer
 
         # Freeze teacher model
         self.teacher_model.eval()
         for param in self.teacher_model.parameters():
             param.requires_grad = False
+
+    def _get_generation_model(self) -> PreTrainedModel:
+        """
+        Get the unwrapped model for generation.
+        
+        In distributed training (DeepSpeed/FSDP), the model is wrapped.
+        We need to unwrap it for generation to work correctly.
+        """
+        return unwrap_model(self.model)
 
     def _generate_student_responses(
         self,
@@ -218,12 +229,20 @@ class OnPolicyKDTrainer(Trainer):
         Returns:
             Tuple of (generated_ids, generated_attention_mask) including prompt and response
         """
-        # Set model to eval mode for generation
-        self.model.eval()
+        # Get unwrapped model for generation
+        generation_model = self._get_generation_model()
+        
+        # Check if we're in distributed training
+        is_distributed = self.args.parallel_mode.value != "not_parallel"
+        
+        # Set model to eval mode for generation (temporarily)
+        was_training = generation_model.training
+        generation_model.eval()
 
         with torch.no_grad():
             # Generate responses
-            outputs = self.model.generate(
+            # Use synced_gpus=True for distributed training to avoid hangs
+            outputs = generation_model.generate(
                 input_ids=student_input_ids,
                 attention_mask=student_attention_mask,
                 max_new_tokens=self.max_new_tokens,
@@ -231,17 +250,20 @@ class OnPolicyKDTrainer(Trainer):
                 temperature=self.generation_temperature,
                 top_p=0.9,
                 num_return_sequences=self.num_samples,
-                pad_token_id=self.tokenizer.pad_token_id,
-                eos_token_id=self.tokenizer.eos_token_id,
+                pad_token_id=self._tokenizer.pad_token_id,
+                eos_token_id=self._tokenizer.eos_token_id,
                 return_dict_in_generate=False,
+                synced_gpus=is_distributed,
+                use_cache=True,
             )
 
-        # Set model back to train mode
-        self.model.train()
+        # Restore training mode
+        if was_training:
+            generation_model.train()
 
         # Create attention mask for generated sequences
         generated_attention_mask = (
-            outputs != self.tokenizer.pad_token_id).long()
+            outputs != self._tokenizer.pad_token_id).long()
 
         return outputs, generated_attention_mask
 
@@ -276,7 +298,7 @@ class OnPolicyKDTrainer(Trainer):
         # Extract response portion from generated sequence
         response_ids = generated_response_ids[:, student_prompt_length:]
         response_attention_mask = (
-            response_ids != self.tokenizer.pad_token_id).long()
+            response_ids != self._tokenizer.pad_token_id).long()
 
         # Concatenate teacher prompt with student-generated response
         teacher_full_input_ids = torch.cat(
@@ -433,7 +455,7 @@ class OnPolicyKDTrainer(Trainer):
 
         # Create mask for valid response tokens (exclude padding)
         response_ids = generated_ids[:, student_prompt_length: student_prompt_length + min_response_len]
-        labels_mask = (response_ids != self.tokenizer.pad_token_id).float()
+        labels_mask = (response_ids != self._tokenizer.pad_token_id).float()
 
         # Step 6: Compute JSD loss
         loss = self._compute_jsd_loss(
