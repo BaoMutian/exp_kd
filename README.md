@@ -40,12 +40,14 @@ pip install flash-attn --no-build-isolation
 ```
 kd/
 ├── configs/
-│   ├── base.yaml                 # 基础配置
-│   ├── seqkd.yaml               # SeqKD 配置
-│   ├── skd.yaml                 # SKD 配置
-│   ├── onpolicy_kd.yaml         # On-Policy KD 配置
-│   ├── accelerate_config.yaml   # 分布式训练配置
-│   └── deepspeed_config.json    # DeepSpeed ZeRO-3 配置
+│   ├── base.yaml                   # 基础配置
+│   ├── seqkd.yaml                  # SeqKD 配置
+│   ├── skd.yaml                    # SKD 配置
+│   ├── onpolicy_kd.yaml            # On-Policy KD 配置
+│   ├── accelerate_config.yaml      # SKD/SeqKD 分布式配置 (ZeRO-3)
+│   ├── accelerate_onpolicy_kd.yaml # On-Policy KD 分布式配置 (ZeRO-2)
+│   ├── deepspeed_config.json       # DeepSpeed ZeRO-3 配置
+│   └── deepspeed_zero2_config.json # DeepSpeed ZeRO-2 配置
 ├── src/
 │   ├── data/
 │   │   └── dataset.py           # 数据加载与预处理
@@ -183,7 +185,9 @@ onpolicy_kd:
 
 对于 8x A100 90GB 配置：
 
-1. **使用 ZeRO-3**: 默认启用，参数和优化器状态分片
+1. **DeepSpeed ZeRO**：
+   - SKD/SeqKD：使用 ZeRO-3（参数分片）
+   - **On-Policy KD：使用 ZeRO-2**（因为 `generate()` 与 ZeRO-3 不兼容）
 2. **梯度检查点**: 默认启用，降低激活内存
 3. **BF16 混合精度**: 默认启用
 
@@ -193,6 +197,8 @@ onpolicy_kd:
 - 增大 `gradient_accumulation_steps`
 - 启用 LoRA（在配置中设置 `peft.enabled: true`）
 - 对于 On-Policy KD，减小 `max_new_tokens`
+
+> ⚠️ **重要**: On-Policy KD 在训练过程中调用 `model.generate()`，这与 DeepSpeed ZeRO-3 的参数分片机制不兼容。因此 On-Policy KD 必须使用 ZeRO-2 配置（`accelerate_onpolicy_kd.yaml`）。
 
 ## On-Policy KD 训练流程
 

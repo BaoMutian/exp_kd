@@ -1,6 +1,9 @@
 #!/bin/bash
 # On-Policy KD Training Launch Script
 # Usage: bash scripts/run_onpolicy_kd.sh [config_file]
+#
+# IMPORTANT: On-Policy KD uses model.generate() during training, which is
+# incompatible with DeepSpeed ZeRO-3. This script uses ZeRO-2 configuration.
 
 set -e
 
@@ -21,9 +24,10 @@ if [ "$NUM_GPUS" -eq 1 ]; then
     python train_onpolicy_kd.py --config "$CONFIG_FILE"
 else
     # Multi-GPU training with accelerate
-    echo "Running distributed training on $NUM_GPUS GPUs..."
+    # NOTE: Uses ZeRO-2 config because generate() requires full model parameters
+    echo "Running distributed training on $NUM_GPUS GPUs with ZeRO-2..."
     accelerate launch \
-        --config_file configs/accelerate_config.yaml \
+        --config_file configs/accelerate_onpolicy_kd.yaml \
         --num_processes $NUM_GPUS \
         train_onpolicy_kd.py --config "$CONFIG_FILE"
 fi

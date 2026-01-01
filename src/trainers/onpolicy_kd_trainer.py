@@ -261,6 +261,26 @@ class OnPolicyKDTrainer(Trainer):
         if was_training:
             generation_model.train()
 
+        # Ensure consistent sequence length across all GPUs by padding to max_length
+        # This is important for distributed training where different GPUs may
+        # generate sequences of different lengths
+        prompt_length = student_input_ids.size(1)
+        target_length = prompt_length + self.max_new_tokens
+        current_length = outputs.size(1)
+
+        if current_length < target_length:
+            # Right-pad to target length
+            pad_size = target_length - current_length
+            outputs = torch.cat([
+                outputs,
+                torch.full(
+                    (outputs.size(0), pad_size),
+                    self._tokenizer.pad_token_id,
+                    device=outputs.device,
+                    dtype=outputs.dtype
+                )
+            ], dim=1)
+
         # Create attention mask for generated sequences
         generated_attention_mask = (
             outputs != self._tokenizer.pad_token_id).long()
@@ -393,6 +413,7 @@ class OnPolicyKDTrainer(Trainer):
         student_input_ids = inputs["student_input_ids"]
         student_attention_mask = inputs["student_attention_mask"]
 
+        device = student_input_ids.device
         student_prompt_length = student_input_ids.size(1)
         teacher_prompt_length = teacher_input_ids.size(1)
 
@@ -400,6 +421,20 @@ class OnPolicyKDTrainer(Trainer):
         generated_ids, generated_attention_mask = self._generate_student_responses(
             student_input_ids, student_attention_mask
         )
+
+        # Safety check: ensure generation produced tokens
+        generated_length = generated_ids.size(1)
+        if generated_length <= student_prompt_length:
+            # No new tokens were generated, return zero loss
+            # Create a dummy forward pass for gradient computation
+            dummy_output = model(
+                input_ids=student_input_ids[:, :1],
+                attention_mask=student_attention_mask[:, :1],
+            )
+            loss = dummy_output.logits.sum() * 0.0
+            if return_outputs:
+                return loss, dummy_output
+            return loss
 
         # Handle num_samples > 1 case
         effective_batch_size = generated_ids.size(0)
@@ -430,6 +465,17 @@ class OnPolicyKDTrainer(Trainer):
         student_logits = student_outputs.logits
 
         # Step 5: Align logits and compute loss on response tokens only
+        # Safety check for sequence lengths
+        student_seq_len = student_logits.size(1)
+        teacher_seq_len = teacher_logits.size(1)
+
+        # Ensure we have enough tokens for slicing
+        if student_seq_len <= student_prompt_length or teacher_seq_len <= teacher_prompt_length:
+            loss = student_logits.sum() * 0.0
+            if return_outputs:
+                return loss, student_outputs
+            return loss
+
         # Extract response logits (shift by 1 for next-token prediction)
         # Student: logits at positions [prompt_len-1 : -1] predict tokens at [prompt_len:]
         student_response_logits = student_logits[:, student_prompt_length - 1:-1, :]
@@ -444,8 +490,7 @@ class OnPolicyKDTrainer(Trainer):
 
         if min_response_len == 0:
             # No response tokens to compute loss on
-            loss = torch.tensor(
-                0.0, device=student_logits.device, requires_grad=True)
+            loss = student_logits.sum() * 0.0
             if return_outputs:
                 return loss, student_outputs
             return loss
@@ -454,7 +499,20 @@ class OnPolicyKDTrainer(Trainer):
         teacher_response_logits = teacher_response_logits[:, :min_response_len, :]
 
         # Create mask for valid response tokens (exclude padding)
-        response_ids = generated_ids[:, student_prompt_length: student_prompt_length + min_response_len]
+        # Safety check for indexing
+        end_idx = min(student_prompt_length + min_response_len, generated_ids.size(1))
+        response_ids = generated_ids[:, student_prompt_length:end_idx]
+
+        # Pad response_ids if needed
+        if response_ids.size(1) < min_response_len:
+            pad_size = min_response_len - response_ids.size(1)
+            response_ids = torch.cat([
+                response_ids,
+                torch.full((response_ids.size(0), pad_size),
+                           self._tokenizer.pad_token_id,
+                           device=device, dtype=response_ids.dtype)
+            ], dim=1)
+
         labels_mask = (response_ids != self._tokenizer.pad_token_id).float()
 
         # Step 6: Compute JSD loss

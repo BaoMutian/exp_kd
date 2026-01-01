@@ -1,0 +1,29 @@
+# Accelerate configuration for On-Policy KD distributed training
+# Uses ZeRO-2 instead of ZeRO-3 because generate() requires full model parameters
+#
+# IMPORTANT: On-Policy KD calls model.generate() during training, which is
+# incompatible with ZeRO-3 parameter sharding. Use ZeRO-2 instead.
+
+compute_environment: LOCAL_MACHINE
+debug: false
+distributed_type: DEEPSPEED
+downcast_bf16: 'no'
+enable_cpu_affinity: false
+
+# DeepSpeed configuration - using ZeRO-2 config
+deepspeed_config:
+  deepspeed_config_file: configs/deepspeed_zero2_config.json
+  zero3_init_flag: false  # IMPORTANT: must be false for generate() to work
+
+# Machine configuration
+machine_rank: 0
+main_training_function: main
+num_machines: 1
+num_processes: 8  # 8 GPUs
+rdzv_backend: static
+same_network: true
+tpu_env: []
+tpu_use_cluster: false
+tpu_use_sudo: false
+use_cpu: false
+
