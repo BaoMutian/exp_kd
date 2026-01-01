@@ -16,7 +16,6 @@ not on the prompt tokens, since the prompts are different between teacher and st
 """
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -26,7 +25,6 @@ from transformers import (
     Trainer,
     TrainingArguments,
 )
-from transformers.trainer_utils import EvalLoopOutput
 from torch.utils.data import Dataset
 
 

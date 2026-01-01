@@ -31,11 +31,9 @@ from src.trainers.skd_trainer import SKDDataCollator
 from src.utils import load_config, get_torch_dtype
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 
-import torch
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 

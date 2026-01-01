@@ -13,7 +13,6 @@ Based on GKD paper: "On-Policy Distillation of Language Models: Learning from Se
 """
 
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -317,10 +316,6 @@ class OnPolicyKDTrainer(Trainer):
         # Compute probabilities
         student_probs = F.softmax(student_logits, dim=-1)
         teacher_probs = F.softmax(teacher_logits, dim=-1)
-
-        # Compute log probabilities
-        student_log_probs = F.log_softmax(student_logits, dim=-1)
-        teacher_log_probs = F.log_softmax(teacher_logits, dim=-1)
 
         # Compute mixture distribution M = beta * P_teacher + (1 - beta) * P_student
         mixture_probs = self.beta * teacher_probs + (1 - self.beta) * student_probs

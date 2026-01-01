@@ -26,12 +26,9 @@ from src.data import create_seqkd_dataset
 from src.utils import load_config, get_torch_dtype
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 
-import torch
-from datasets import Dataset
 from peft import LoraConfig, get_peft_model
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
