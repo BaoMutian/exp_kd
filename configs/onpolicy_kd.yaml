@@ -66,4 +66,3 @@ training:
 data:
   # Maximum prompt length (response will be generated on top of this)
   max_seq_length: 4096
-
