@@ -27,6 +27,10 @@ Usage:
         --config configs/onpolicy_kd.yaml
 """
 
+from src.utils import load_config, get_torch_dtype
+from src.trainers.onpolicy_kd_trainer import OnPolicyKDDataCollator
+from src.trainers import OnPolicyKDTrainer
+from src.data import create_onpolicy_kd_dataset
 import argparse
 import logging
 import sys
@@ -37,11 +41,6 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, TrainingArguments
 
 # Add project root to path for local imports
 sys.path.insert(0, str(Path(__file__).parent))
-
-from src.data import create_onpolicy_kd_dataset
-from src.trainers import OnPolicyKDTrainer
-from src.trainers.onpolicy_kd_trainer import OnPolicyKDDataCollator
-from src.utils import load_config, get_torch_dtype
 
 
 logging.basicConfig(
@@ -62,8 +61,10 @@ def parse_args():
     # Allow overriding config values from command line
     parser.add_argument("--learning_rate", type=float, default=None)
     parser.add_argument("--num_train_epochs", type=int, default=None)
-    parser.add_argument("--per_device_train_batch_size", type=int, default=None)
-    parser.add_argument("--gradient_accumulation_steps", type=int, default=None)
+    parser.add_argument("--per_device_train_batch_size",
+                        type=int, default=None)
+    parser.add_argument("--gradient_accumulation_steps",
+                        type=int, default=None)
     parser.add_argument("--output_dir", type=str, default=None)
     parser.add_argument("--temperature", type=float, default=None)
     parser.add_argument("--beta", type=float, default=None)
@@ -118,7 +119,8 @@ def main():
     temperature = onpolicy_kd_config.get("temperature", 1.0)
     beta = onpolicy_kd_config.get("beta", 0.5)
     max_new_tokens = onpolicy_kd_config.get("max_new_tokens", 256)
-    generation_temperature = onpolicy_kd_config.get("generation_temperature", 0.9)
+    generation_temperature = onpolicy_kd_config.get(
+        "generation_temperature", 0.9)
     num_samples = onpolicy_kd_config.get("num_samples", 1)
 
     logger.info("=" * 60)
@@ -156,7 +158,8 @@ def main():
         model_config.get("student_path"),
         torch_dtype=torch_dtype,
         trust_remote_code=model_config.get("trust_remote_code", True),
-        attn_implementation=model_config.get("attn_implementation", "flash_attention_2"),
+        attn_implementation=model_config.get(
+            "attn_implementation", "flash_attention_2"),
     )
 
     logger.info("Loading teacher model...")
@@ -164,7 +167,8 @@ def main():
         model_config.get("teacher_path"),
         torch_dtype=torch_dtype,
         trust_remote_code=model_config.get("trust_remote_code", True),
-        attn_implementation=model_config.get("attn_implementation", "flash_attention_2"),
+        attn_implementation=model_config.get(
+            "attn_implementation", "flash_attention_2"),
     )
 
     # Apply PEFT/LoRA to student if enabled
@@ -174,7 +178,8 @@ def main():
             r=peft_config.get("lora_r", 64),
             lora_alpha=peft_config.get("lora_alpha", 128),
             lora_dropout=peft_config.get("lora_dropout", 0.05),
-            target_modules=peft_config.get("target_modules", ["q_proj", "v_proj"]),
+            target_modules=peft_config.get(
+                "target_modules", ["q_proj", "v_proj"]),
             bias="none",
             task_type="CAUSAL_LM",
         )
@@ -199,9 +204,12 @@ def main():
     # Training arguments
     training_args = TrainingArguments(
         output_dir=str(output_dir),
-        per_device_train_batch_size=training_config.get("per_device_train_batch_size", 1),
-        per_device_eval_batch_size=training_config.get("per_device_eval_batch_size", 1),
-        gradient_accumulation_steps=training_config.get("gradient_accumulation_steps", 16),
+        per_device_train_batch_size=training_config.get(
+            "per_device_train_batch_size", 1),
+        per_device_eval_batch_size=training_config.get(
+            "per_device_eval_batch_size", 1),
+        gradient_accumulation_steps=training_config.get(
+            "gradient_accumulation_steps", 16),
         learning_rate=training_config.get("learning_rate", 1e-5),
         weight_decay=training_config.get("weight_decay", 0.01),
         num_train_epochs=training_config.get("num_train_epochs", 3),
@@ -210,7 +218,8 @@ def main():
         lr_scheduler_type=training_config.get("lr_scheduler_type", "cosine"),
         bf16=training_config.get("bf16", True),
         fp16=training_config.get("fp16", False),
-        gradient_checkpointing=training_config.get("gradient_checkpointing", True),
+        gradient_checkpointing=training_config.get(
+            "gradient_checkpointing", True),
         max_grad_norm=training_config.get("max_grad_norm", 1.0),
         logging_steps=training_config.get("logging_steps", 5),
         logging_first_step=training_config.get("logging_first_step", True),
@@ -220,7 +229,8 @@ def main():
         save_total_limit=training_config.get("save_total_limit", 3),
         seed=training_config.get("seed", 42),
         data_seed=training_config.get("data_seed", 42),
-        report_to="wandb" if config.get("wandb", {}).get("enabled", False) else "none",
+        report_to="wandb" if config.get("wandb", {}).get(
+            "enabled", False) else "none",
         remove_unused_columns=False,  # Important for custom data collator
     )
 
@@ -260,4 +270,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

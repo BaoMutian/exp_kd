@@ -8,11 +8,11 @@
 
 ### 蒸馏方法对比
 
-| 方法 | 训练数据来源 | 原理 | 特点 |
-|------|-------------|------|------|
-| **SeqKD** | 固定（教师输出） | 在学生输入上对教师输出做 SFT | 简单高效，本质是标准 SFT |
-| **SKD** | 固定（真值序列） | 最小化 Token 级 KL 散度 | 保留教师的概率分布信息（暗知识） |
-| **On-Policy KD** | 学生实时生成 | 学生采样 + 教师评分 | 解决训练-推理分布不匹配问题 |
+| 方法             | 训练数据来源     | 原理                         | 特点                             |
+| ---------------- | ---------------- | ---------------------------- | -------------------------------- |
+| **SeqKD**        | 固定（教师输出） | 在学生输入上对教师输出做 SFT | 简单高效，本质是标准 SFT         |
+| **SKD**          | 固定（真值序列） | 最小化 Token 级 KL 散度      | 保留教师的概率分布信息（暗知识） |
+| **On-Policy KD** | 学生实时生成     | 学生采样 + 教师评分          | 解决训练-推理分布不匹配问题      |
 
 ### On-Policy KD 优势
 
@@ -120,7 +120,7 @@ python train_onpolicy_kd.py --config configs/onpolicy_kd.yaml \
 model:
   student_path: "Qwen/Qwen3-8B"
   teacher_path: "Qwen/Qwen3-8B"
-  enable_thinking: false  # Qwen3 non-thinking 模式
+  enable_thinking: false # Qwen3 non-thinking 模式
   torch_dtype: bfloat16
 
 training:
@@ -134,20 +134,20 @@ training:
 
 ```yaml
 skd:
-  temperature: 4.0       # 软标签温度
-  alpha: 0.5             # KL损失权重
-  kl_direction: reverse  # forward 或 reverse
+  temperature: 4.0 # 软标签温度
+  alpha: 0.5 # KL损失权重
+  kl_direction: reverse # forward 或 reverse
 ```
 
 ### On-Policy KD 特定配置
 
 ```yaml
 onpolicy_kd:
-  temperature: 1.0              # 损失计算时的温度
-  beta: 0.5                     # JSD 插值系数 (0=前向KL, 0.5=对称JSD, 1=反向KL)
-  max_new_tokens: 256           # 最大生成长度
-  generation_temperature: 0.9   # 生成采样温度
-  num_samples: 1                # 每个输入采样的回复数量
+  temperature: 1.0 # 损失计算时的温度
+  beta: 0.5 # JSD 插值系数 (0=前向KL, 0.5=对称JSD, 1=反向KL)
+  max_new_tokens: 256 # 最大生成长度
+  generation_temperature: 0.9 # 生成采样温度
+  num_samples: 1 # 每个输入采样的回复数量
 ```
 
 ## 关键参数说明
@@ -188,6 +188,7 @@ onpolicy_kd:
 3. **BF16 混合精度**: 默认启用
 
 如果仍然 OOM，可以：
+
 - 减小 `per_device_train_batch_size`
 - 增大 `gradient_accumulation_steps`
 - 启用 LoRA（在配置中设置 `peft.enabled: true`）
@@ -223,6 +224,7 @@ tokenizer.apply_chat_template(
 ```
 
 推荐采样参数：
+
 - Temperature: 0.7
 - TopP: 0.8
 - TopK: 20

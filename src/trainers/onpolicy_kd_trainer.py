@@ -88,8 +88,10 @@ class OnPolicyKDDataCollator:
 
         for feature in features:
             # Tokenize teacher and student prompts
-            teacher_enc = self._tokenize_prompt(feature["teacher_prompt_messages"])
-            student_enc = self._tokenize_prompt(feature["student_prompt_messages"])
+            teacher_enc = self._tokenize_prompt(
+                feature["teacher_prompt_messages"])
+            student_enc = self._tokenize_prompt(
+                feature["student_prompt_messages"])
 
             teacher_encodings.append(teacher_enc)
             student_encodings.append(student_enc)
@@ -107,7 +109,8 @@ class OnPolicyKDDataCollator:
             teacher_input_ids.append(
                 [self.tokenizer.pad_token_id] * padding_len + enc["input_ids"]
             )
-            teacher_attention_mask.append([0] * padding_len + enc["attention_mask"])
+            teacher_attention_mask.append(
+                [0] * padding_len + enc["attention_mask"])
 
         # Pad student inputs (left padding for generation)
         student_input_ids = []
@@ -118,7 +121,8 @@ class OnPolicyKDDataCollator:
             student_input_ids.append(
                 [self.tokenizer.pad_token_id] * padding_len + enc["input_ids"]
             )
-            student_attention_mask.append([0] * padding_len + enc["attention_mask"])
+            student_attention_mask.append(
+                [0] * padding_len + enc["attention_mask"])
 
         return {
             "teacher_input_ids": torch.tensor(teacher_input_ids, dtype=torch.long),
@@ -236,7 +240,8 @@ class OnPolicyKDTrainer(Trainer):
         self.model.train()
 
         # Create attention mask for generated sequences
-        generated_attention_mask = (outputs != self.tokenizer.pad_token_id).long()
+        generated_attention_mask = (
+            outputs != self.tokenizer.pad_token_id).long()
 
         return outputs, generated_attention_mask
 
@@ -270,7 +275,8 @@ class OnPolicyKDTrainer(Trainer):
 
         # Extract response portion from generated sequence
         response_ids = generated_response_ids[:, student_prompt_length:]
-        response_attention_mask = (response_ids != self.tokenizer.pad_token_id).long()
+        response_attention_mask = (
+            response_ids != self.tokenizer.pad_token_id).long()
 
         # Concatenate teacher prompt with student-generated response
         teacher_full_input_ids = torch.cat(
@@ -315,7 +321,8 @@ class OnPolicyKDTrainer(Trainer):
         teacher_probs = F.softmax(teacher_logits, dim=-1)
 
         # Compute mixture distribution M = beta * P_teacher + (1 - beta) * P_student
-        mixture_probs = self.beta * teacher_probs + (1 - self.beta) * student_probs
+        mixture_probs = self.beta * teacher_probs + \
+            (1 - self.beta) * student_probs
         mixture_log_probs = torch.log(mixture_probs + 1e-10)
 
         # Compute JSD components
@@ -330,7 +337,8 @@ class OnPolicyKDTrainer(Trainer):
         ).sum(dim=-1)
 
         # JSD = beta * KL(P_teacher || M) + (1 - beta) * KL(P_student || M)
-        jsd = self.beta * kl_teacher_mixture + (1 - self.beta) * kl_student_mixture
+        jsd = self.beta * kl_teacher_mixture + \
+            (1 - self.beta) * kl_student_mixture
 
         # Apply mask and compute mean loss
         masked_jsd = jsd * labels_mask
@@ -414,7 +422,8 @@ class OnPolicyKDTrainer(Trainer):
 
         if min_response_len == 0:
             # No response tokens to compute loss on
-            loss = torch.tensor(0.0, device=student_logits.device, requires_grad=True)
+            loss = torch.tensor(
+                0.0, device=student_logits.device, requires_grad=True)
             if return_outputs:
                 return loss, student_outputs
             return loss
@@ -423,7 +432,7 @@ class OnPolicyKDTrainer(Trainer):
         teacher_response_logits = teacher_response_logits[:, :min_response_len, :]
 
         # Create mask for valid response tokens (exclude padding)
-        response_ids = generated_ids[:, student_prompt_length : student_prompt_length + min_response_len]
+        response_ids = generated_ids[:, student_prompt_length: student_prompt_length + min_response_len]
         labels_mask = (response_ids != self.tokenizer.pad_token_id).float()
 
         # Step 6: Compute JSD loss
@@ -457,4 +466,3 @@ class OnPolicyKDTrainer(Trainer):
                 self.teacher_model = self.teacher_model.to(device)
 
         return inputs
-
