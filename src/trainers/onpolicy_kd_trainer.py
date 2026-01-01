@@ -259,9 +259,6 @@ class OnPolicyKDTrainer(Trainer):
         Returns:
             Tuple of (teacher_full_input_ids, teacher_full_attention_mask)
         """
-        batch_size = teacher_input_ids.size(0)
-        device = teacher_input_ids.device
-
         # If num_samples > 1, we need to expand teacher inputs
         if self.num_samples > 1:
             teacher_input_ids = teacher_input_ids.repeat_interleave(
@@ -366,7 +363,6 @@ class OnPolicyKDTrainer(Trainer):
         student_input_ids = inputs["student_input_ids"]
         student_attention_mask = inputs["student_attention_mask"]
 
-        batch_size = student_input_ids.size(0)
         student_prompt_length = student_input_ids.size(1)
         teacher_prompt_length = teacher_input_ids.size(1)
 
@@ -404,10 +400,6 @@ class OnPolicyKDTrainer(Trainer):
         student_logits = student_outputs.logits
 
         # Step 5: Align logits and compute loss on response tokens only
-        # We need to compute loss on the response portion
-        response_length = generated_ids.size(1) - student_prompt_length
-        teacher_response_length = teacher_full_ids.size(1) - teacher_prompt_length
-
         # Extract response logits (shift by 1 for next-token prediction)
         # Student: logits at positions [prompt_len-1 : -1] predict tokens at [prompt_len:]
         student_response_logits = student_logits[:, student_prompt_length - 1:-1, :]
