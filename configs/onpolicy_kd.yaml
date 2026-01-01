@@ -1,0 +1,64 @@
+# On-Policy KD (Online Knowledge Distillation) configuration
+# On-Policy KD trains the student to match teacher's distribution on student-generated sequences
+# This addresses the train-inference distribution mismatch problem
+
+# Inherit from base configuration
+defaults:
+  - base
+
+# Override model settings if needed
+model:
+  student_path: "Qwen/Qwen3-8B"
+  teacher_path: "Qwen/Qwen3-8B"
+
+# On-Policy KD specific settings
+onpolicy_kd:
+  # Temperature for softening probability distributions during loss computation
+  # Higher temperature -> softer distributions -> more knowledge transfer
+  # Recommended: 1.0-2.0 for on-policy distillation
+  temperature: 1.0
+
+  # Beta: JSD interpolation coefficient
+  # beta=0.0: Forward KL (KL(teacher || student)) - mean-seeking, covers all modes
+  # beta=1.0: Reverse KL (KL(student || teacher)) - mode-seeking, focuses on high-prob tokens
+  # beta=0.5: Symmetric JSD (balanced)
+  # Recommended: 0.5 for symmetric or 0.0 for forward KL
+  beta: 0.5
+
+  # Generation settings for student sampling
+  # Maximum number of new tokens to generate per response
+  max_new_tokens: 256
+
+  # Temperature for sampling during generation (higher = more diverse)
+  generation_temperature: 0.9
+
+  # Number of response samples to generate per input
+  # More samples provide more stable gradients but increase compute cost
+  # Recommended: 1-4 depending on batch size and compute budget
+  num_samples: 1
+
+# Training configuration overrides
+training:
+  output_dir: "outputs/onpolicy_kd"
+
+  num_train_epochs: 3
+
+  # On-Policy KD requires loading both teacher and student + generation
+  # May need smaller batch size due to generation overhead
+  per_device_train_batch_size: 1
+  gradient_accumulation_steps: 16
+
+  # Moderate learning rate for on-policy learning
+  learning_rate: 1.0e-5
+
+  # Standard gradient clipping
+  max_grad_norm: 1.0
+
+  # Logging more frequently to monitor generation quality
+  logging_steps: 5
+
+# Data configuration overrides
+data:
+  # Maximum prompt length (response will be generated on top of this)
+  max_seq_length: 2048
+
