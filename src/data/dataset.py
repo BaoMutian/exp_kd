@@ -50,7 +50,6 @@ class KDDataset:
     Combines teacher and student data for different KD methods:
     - SeqKD: student input + teacher output
     - SKD: paired (teacher input, student input, target output)
-    - GKD: student input + teacher output (for supervised part)
     """
     
     def __init__(
@@ -165,45 +164,6 @@ def create_skd_dataset(
             "teacher_messages": teacher_messages,
             "student_messages": student_messages,
         })
-    
-    return Dataset.from_list(data)
-
-
-def create_gkd_dataset(
-    teacher_data_path: Union[str, Path],
-    student_data_path: Union[str, Path],
-) -> Dataset:
-    """
-    Create dataset for GKD (Generalized Knowledge Distillation).
-    
-    GKD uses TRL's GKDTrainer which expects a 'messages' format.
-    The trainer handles on-policy generation internally.
-    
-    For the supervised part (lmbda < 1.0), we use:
-    - Messages: student input + teacher output
-    
-    For on-policy part, the trainer will generate outputs from the student.
-    
-    NOTE: In on-policy mode (lmbda > 0), the teacher model uses the same input
-    as the student (without experience E). This is a limitation of TRL's GKDTrainer.
-    For best results with our experience internalization task, use lmbda=0 (pure supervised)
-    or consider using SKD instead.
-    
-    Args:
-        teacher_data_path: Path to teacher dataset
-        student_data_path: Path to student dataset
-        
-    Returns:
-        HuggingFace Dataset with 'messages' column
-    """
-    teacher_data, student_data = load_kd_dataset(teacher_data_path, student_data_path)
-    kd_dataset = KDDataset(teacher_data, student_data)
-    
-    # Create dataset with student input + teacher output (messages format for GKD)
-    data = []
-    for idx in range(len(kd_dataset)):
-        messages = kd_dataset.get_student_messages(idx)
-        data.append({"messages": messages})
     
     return Dataset.from_list(data)
 
